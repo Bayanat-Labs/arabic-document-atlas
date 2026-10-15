@@ -1,0 +1,21 @@
+name: Validate dataset engineering contracts
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt
+      - name: Geometry, identity, encoding and durable-state regressions
+        run: python -m unittest discover -s quality -p 'test_*.py' -v
+      - name: Source and community-text package regressions
+        run: python -m unittest discover -s audit -p 'test_*.py' -v
+      - name: Pipeline syntax and static viewer JavaScript
+        run: |
+          python -m compileall -q acquisition audit pipeline quality
+          node --check explorer/app.js

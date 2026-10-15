@@ -1,0 +1,8 @@
+private/
+__pycache__/
+*.pyc
+.DS_Store
+*.sqlite*
+*.part
+.venv/
+dist/

@@ -1,0 +1,17 @@
+[
+  {
+    "source_document_id": "princeton_aco000672",
+    "note_type": "catalog_metadata_content_discrepancy_spot_check",
+    "reviewed_at_utc": "2026-10-15",
+    "source_canvas_id": "https://sites.dlib.nyu.edu/viewer/api/presentation/books/princeton_aco000672/canvas/9",
+    "source_pdf_page_index": 8,
+    "source_manifest_sha256": "eabfcf2ea833f1362088d8593c2e8e00f420e8cb4907ebc0f0753885b13bae8d",
+    "source_pdf_sha256": "b4c434fd46f13a349046eb661f039de4f88e5ba488f00eaa22f9bbb3c054760b",
+    "catalog_title_ar": "كتاب العضب المنظوم للذب عن سنة المعصوم.",
+    "catalog_publication_date_raw": "1337 [1919]",
+    "observed_title_leaf_heading": "فتح الملك الجليل",
+    "observed_title_leaf_years": "1345 AH / 1926 CE",
+    "finding": "Visual comparison found the same title leaf at IIIF canvas9 and high-PDF zero-based page8; no offset observed at this spot. The leaf heading/year differs from catalog title/year, consistent with bound-volume context or source catalog discrepancy. Preserve both evidence and source metadata; do not silently relabel the entire document or infer every bound work has the catalog year.",
+    "limits": "One visual spot check, not independent alignment validation of every canvas or a proofread transcription. Both source representations were retrieved from the publisher."
+  }
+]

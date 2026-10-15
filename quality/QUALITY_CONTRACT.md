@@ -1,0 +1,66 @@
+# Arabic Document Atlas quality contract v2
+
+This contract validates source identity, an actual published raster, extraction structure and transparent screening. Passing it does **not** establish transcription accuracy, correct semantic reading order, complete layout annotation, correct language identification, or a gold benchmark. Engineering fixtures in this directory are never included in dataset counts.
+
+## Record and coordinate contract
+
+The implementation is `validate.py`. `validate_page(row, image_bytes=...)` returns separate `valid` and `curated_eligible` fields, issue codes, measured metrics and the exact screening policy. Structural failures are quarantined, never repaired by clipping boxes or deleting source characters. The publication pipeline must pass the actual encoded image bytes. Missing bytes are explicitly unverified and never curated-eligible.
+
+Required identity/provenance fields are `source_collection`, `source_document_id`, `document_id`, `work_group_id`, `source_canvas_id`, `image_request_profile`, `page_id`, `logical_page_id`, `split`, `image_sha256`, `width`, `height`, `source_url`, `source_manifest_url`, `source_manifest_sha256`, `source_page_label`, zero-based `source_page_index`, `source_image_url`, original `source_image_width`/`source_image_height`, `source_rights`, `source_rights_url`, and `source_rights_basis`. URLs must use HTTPS and contain neither userinfo nor credential/signature query parameters. Store public stable source URLs, never expiring authenticated download URLs. Original source rights wording and the evidence behind the reuse decision remain separate fields. Ordinary newline, carriage-return and tab are preserved in source rights statements/bases and human page labels. Identifiers and URLs remain strict; NUL, other controls and surrogates are rejected. The builder checks this source metadata for every canvas before OCR.
+
+IDs are lowercase SHA256 of UTF-8 canonical compact JSON, with `ensure_ascii=False` and separators `(',', ':')`:
+
+```text
+logical_page_id = SHA256(JSON([source_collection, source_document_id, source_canvas_id]))
+page_id = SHA256(JSON([logical_page_id, image_request_profile]))
+```
+
+A logical page remains the same page when its resolution, format or OCR engine changes. Count distinct logical IDs for the physical-page count, not profile variants, words, regions, OCR engines, augmentations or discovered manifests. A new edition/scan requires its actual distinct source document identity. Canonical JSON prevents delimiter collisions.
+
+Published `words` contain unique page-local `id`, source `text`, `bbox`, `confidence`, and `line_id`. `lines` contain unique `id`, `text`, `bbox`, `word_ids`, `order_index`, and `order_method`. A box is integer `[x0,y0,x1,y1]` in a **top-left-origin, half-open pixel coordinate space of the published raster**, satisfying `0 <= x0 < x1 <= width` and likewise for y. Native-PDF points, original scan pixels, resized raster pixels and crops are different coordinate spaces. Transforms must be explicit before a record is normalized; native points are not relabeled as pixels.
+
+Every word belongs to exactly one line; each line references existing words with matching `line_id`; line boxes enclose their words. `order_index` must be a permutation of `0..n-1`. For machine-extracted text, line text follows recorded word IDs and page text follows declared line order after NFC/whitespace comparison. This catches broken joins without pretending that coordinates alone establish Arabic reading order. Tesseract rows state `order_method=tesseract_hierarchy`; Apple rows state `apple_vision_observation_order`; multi-column, footnote, marginal and mixed-direction order remains unverified. If a containing line envelope is the union of original observation and word boxes, record its `bbox_method`; the union is a derived envelope, not an original engine line box.
+
+Apple's [`VNRecognizedText.boundingBox(for:)` documentation](https://developer.apple.com/documentation/vision/vnrecognizedtext/boundingbox%28for%3A%29) says returned boxes are not always an exact character fit and provide general UI guidance. Accurate recognition has word precision, not character precision. Treat this output as **approximate machine localization**, not pixel-accurate training ground truth or independently verified text detection. Do not claim that geometry-valid boxes prove localization accuracy or are suitable for exact character crops.
+
+## Text, script and confidence
+
+`page_text` preserves extracted/source Unicode. Reject unpaired surrogates, NUL and other C0/C1 controls except tab/newline/carriage-return. Measure and flag replacement U+FFFD, private-use characters, Arabic presentation forms and explicit bidi embeddings/overrides/isolates. Ordinary Arabic mixed with English, Arabic-Indic/Western digits, punctuation, diacritics and directional marks is not automatically invalid. The Unicode [Bidirectional Algorithm](https://www.unicode.org/reports/tr9/) explains why logical string order and visual order differ; reversing all text or sorting every word by x is not an Arabic correction algorithm.
+
+`arabic_char_fraction` is Arabic-script **letters divided by all Unicode letters**, zero when there are no letters. The implementation uses Unicode letter categories and character names containing `ARABIC`. It includes Persian/Urdu Arabic-script letters and presentation forms; it is not an Arabic-language classifier. Keep this definition in the data dictionary and record the Python Unicode database version in build metadata.
+
+`text_source` is one of `tesseract`, `apple_vision`, `native_pdf`, `source_proofread`, `none`. `annotation_review` is `machine_generated` or `source_community_proofread`. Machine extraction cannot inherit community-proofread status from separate `reference_text`. Preserve actual proofreading status/revision and rights with the reference; neither community proofreading nor OCR/reference agreement independently validates alignment or boxes.
+
+Tesseract TSV confidence is an engine word score in `0..100`; `-1` on higher-level TSV rows is a non-word sentinel and must not become a word confidence. Native/reference confidence is null. `mean_word_confidence` is the unweighted mean of actual numeric word scores, null with no scores. A high mean is not a calibrated probability, CER/WER, review or gold label. See the official [TSV/hOCR examples](https://tesseract-ocr.github.io/tessdoc/Command-Line-Usage.html).
+
+Apple word records carry their parent line candidate's confidence multiplied by100. Require `confidence_basis=line_candidate_uncalibrated` and equality with the parent line score. The resulting mean is a word-count-weighted summary of line scores, not an independently estimated word confidence. Do not rank mixed Tesseract/Apple records as if their confidence scales were calibrated or interchangeable.
+
+Default provisional screening is at least20 word records, Arabic letter fraction at least0.5, replacement-character fraction at most0.005, no private-use characters or explicit bidi controls requiring review, actual verified image bytes, and no structural errors. These are configurable cohort-selection rules, not scientifically established accuracy thresholds. Low text, non-Arabic pages and low-confidence pages can remain in a clearly flagged full image inventory. Do not call a page blank merely because OCR returned no text. Aggregate source/proofread/engine-confidence distributions before choosing a final training subset.
+
+## Deduplication and splits
+
+Three exact identities have distinct meanings:
+
+1. Encoded `image_sha256` identifies exact distributed file bytes.
+2. `pixel_sha256` hashes decoded RGBA pixels plus mode and dimensions, preserving alpha. It catches identical rasters re-encoded with different compression. Persist it for the collection audit.
+3. Normalized text SHA uses NFC plus collapsed whitespace, with a minimum80-character text length. It preserves digits, punctuation, Arabic letter distinctions, diacritics and tatweel. Equal text can appear on distinct physical pages/editions; this is leakage evidence, not proof of one physical page.
+
+`dhash64` is only a perceptual-duplicate candidate key. Similar hashes, title/author matches, shared headers, or equal OCR are insufficient to silently delete pages or assert two editions are one work. Low-resolution re-renders and different scans need a later audited similarity/edition process. Count and report candidate groups separately.
+
+The first release uses **train only**, with no held-out evaluation claim. `train` is a loading split. `document_split` is an unused utility for possible future document partitions, not the production builder's split assignment. `work_group_id` initially being a source document ID does not establish actual work clustering. Any later evaluation release must state and validate its actual partition policy.
+
+`audit_collection` uses disk-backed SQLite, a32MiB cache, and a streaming input to inspect duplicate page IDs, logical variants, split assignments, encoded image hashes, supplied pixel hashes and normalized text. It never drops records. Publication of held-out partitions requires no cross-split exact image/pixel/eligible-text duplicate groups and no document crossing splits. Move an entire connected duplicate-document component to one split, or exclude ambiguous components from evaluation. Do not randomly split pages and then claim independent document evaluation. A clean exact audit still does not establish absence of all near duplicates or cross-edition leakage.
+
+## Local tools and compute
+
+Initial local probe2026-10-15: Tesseract, pdftotext and pdftoppm are installed; system Tesseract initially had only `eng` and `osd`; Pillow includes RAQM. System Python did not contain PyTorch, Surya or Docling at that probe. Root owns pinned Arabic-model installation and actual hardware/throughput measurements.
+
+Tesseract is a practical CPU baseline. Official [Arabic model support](https://tesseract-ocr.github.io/tessdoc/Data-Files-in-different-versions.html) includes `ara`; the [fast model repository](https://github.com/tesseract-ocr/tessdata_fast) is Apache2.0 and describes a speed/accuracy compromise, supporting the LSTM engine only. Pin the engine, model commit/hashes, language order, segmentation mode, resize profile and preprocessing. `ara+eng` and `eng+ara` can differ. Resolution/layout affects results, so benchmark representative real historical pages before extrapolating throughput or error quality. See [Tesseract quality guidance](https://tesseract-ocr.github.io/tessdoc/ImproveQuality.html). A directory containing only pinned `.traineddata` files lacks `configs/tsv`; explicitly use `-c tessedit_create_tsv=1` rather than assuming a `tsv` config file exists there.
+
+Current [Surya2 documentation](https://github.com/datalab-to/surya) describes a650M VLM with llama.cpp for CPU/Apple Silicon and vLLM for NVIDIA. Its code is Apache2.0, but model weights have modified AI Pubs Open Rail-M terms with a startup funding/revenue condition; do not describe the weights as unconditionally Apache2.0. No Surya installation or managed API is part of this validator.
+
+[Docling's accelerator example](https://docling-project.github.io/docling/_generated/examples/run_with_accelerator/) documents CPU and macOS MPS configurations; [pipeline options](https://docling-project.github.io/docling/reference/pipeline_options/) include Tesseract/EasyOCR and engine-specific confidence scales. Available support does not prove performance on our Arabic pages. Avoid mixing confidence scales or calling a Tesseract TSV hierarchy a full semantic layout/table annotation.
+
+## Verification
+
+Run `python3 -m unittest discover -s research/arabic-document-atlas/quality -p 'test_*.py' -v`. The tests include adversarial RTL/mixed-script records, controls and credentials, confidence sentinels/NaN, out-of-bounds geometry, line membership/order corruption, lost original-engine words during reconstruction, image re-encoding and alpha, cross-book duplicate text, profile/physical identity, and cross-split document leakage. A tiny original native PDF is actually extracted with Poppler, rendered at144DPI, and OCRed by installed Tesseract English to check coordinate units and real TSV semantics. Independent Arabic raster fixtures are actually processed by pinned Arabic Tesseract and the local Apple Vision binary when available. These tests check structural integration, not measured CER/WER. The22 validator tests passed in the local system Python with RAQM on2026-10-15. The shared build environment lacks RAQM, so the two generated-Arabic-fixture integrations explicitly skip there; actual corpus pages do not require RAQM for OCR. Nine additional durable-builder tests check immutable resume bindings, fixed blank/text schemas, actual Hugging Face streaming/PIL decoding, native partial-response timeout/restart, source inventory revisions, exact-pixel duplicate lineage, corrupted/uncommitted shard detection, multiline source metadata, and hash-bound verified-input eviction. The shared build suite has31 tests, with the two RAQM-dependent fixture integrations explicitly skipped there. No fixture success is counted as a real corpus page or an Arabic OCR accuracy result.
