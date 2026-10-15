@@ -213,7 +213,9 @@ def package(output, books, community, version, references=None):
             'page_data_commit_before_documentation':remote.sha,
             'counts_are_not_additive':'The total image count is the union of decoded-pixel hashes across image components. Community text, reference transcriptions, word records and duplicate occurrences are not additional unique images.',
             'source_selection':'Institution-asserted public domain; unambiguous edition year <=1930; Arabic; no contrary manifest rights evidence.',
+            'source_selection_scope':'ACO pages and duplicate_occurrences only; reference_pairs uses separately documented file-specific CC permission and source-version checks.',
             'catalog_publication_year_exclusive_max':1931,
+            'catalog_publication_year_policy_scope':'ACO pages component only; reference-pair PDFs have no pre-1931 date claim.',
             'catalog_years_are_not_independently_verified_page_dates':True,
         }
         dump(release/'metadata/release-summary.json',summary)
@@ -242,6 +244,12 @@ def package(output, books, community, version, references=None):
                 shutil.copy2(audit,release/'reports'/audit.name)
         for name in ['DATA_LICENSE.md','ATTRIBUTION.md','LICENSE','CITATION.cff']:
             shutil.copy2(SOURCE/name,release/name)
+        citation=release/'CITATION.cff'
+        text=citation.read_text()
+        for key,value in [('version',version.removeprefix('v')),('date-released',now[:10])]:
+            line=key+': '+json.dumps(value)
+            text=re.sub(r'(?m)^'+key+r':[^\n]*$',lambda _:line,text) if re.search(r'(?m)^'+key+':',text) else text.rstrip()+'\n'+line+'\n'
+        citation.write_text(text)
         for name in [n for n in SOURCE_FILES if n.startswith('docs/')]:
             source=SOURCE/name
             if source.is_symlink() or not source.resolve().is_relative_to(SOURCE):raise ValueError('Unsafe public documentation path')
