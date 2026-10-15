@@ -283,6 +283,40 @@ def _finish_visibility(api, statepath, state, commit, public):
     _save(statepath, state)
 
 
+def _completed_history(api, state, pending):
+    """Retire only a proven completed receipt, without writing state yet.
+
+    A new version still has to pass its own initial-HEAD checks before this
+    history and the new pending receipt are saved together. An unfinished or
+    inconsistent previous transaction is never discarded to make progress.
+    """
+    completed=state.get('completed_snapshot')
+    if (pending.get('phase')!='complete' or pending.get('schema')!=1
+            or not isinstance(completed,dict) or state.get('dataset_staged') is not True):
+        raise ValueError('Another version has unfinished or unproven completed publication state')
+    version=pending.get('version');commit=pending.get('commit');manifest=pending.get('package_manifest')
+    if (not re.fullmatch(r'v\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?',str(version))
+            or not re.fullmatch('[0-9a-f]{40}',str(commit))
+            or state.get('dataset_version')!=version or state.get('dataset_commit')!=commit
+            or completed.get('version')!=version or completed.get('commit')!=commit
+            or pending.get('last_remote_head')!=commit or pending.get('inflight') is not None
+            or not isinstance(manifest,dict) or REPORT not in manifest
+            or pending.get('package_manifest_sha256')!=_digest(manifest)
+            or completed.get('package_manifest')!=manifest
+            or completed.get('package_manifest_sha256')!=_digest(manifest)):
+        raise ValueError('Previous completed publication state or manifest does not match its owned proof')
+    previous_tag=_tag(api,version)
+    if previous_tag is None or previous_tag.target_commit!=commit:
+        raise ValueError('Previous immutable version tag differs from the owned completed proof')
+    history=state.get('completed_snapshot_history',[])
+    if not isinstance(history,list) or any(not isinstance(item,dict) for item in history):
+        raise ValueError('Invalid completed snapshot history')
+    previous=[item for item in history if item.get('version')==version]
+    if previous and (len(previous)!=1 or previous[0]!=completed):
+        raise ValueError('Completed snapshot history conflicts with the previous owned proof')
+    return history if previous else history+[completed]
+
+
 def _publish(output, version, public):
     output = Path(output).resolve(); release = output / 'release'; statepath = output / 'private/publication.json'
     state = json.loads(statepath.read_text())
@@ -312,8 +346,11 @@ def _publish(output, version, public):
         state['completed_snapshot']={'version':version,'commit':commit,'package_manifest':local,'package_manifest_sha256':_digest(local)}
         _finish_visibility(api,statepath,state,commit,public)
         return {'stage':'dataset_snapshot_already_published','version':version,'commit':commit,'public':bool(state.get('dataset_public'))}
+    completed_history=None
+    if pending and pending.get('version')!=version:
+        completed_history=_completed_history(api,state,pending)
+        pending=None
     if pending:
-        if pending.get('version') != version: raise ValueError('Another version has unfinished publication state')
         if pending.get('schema') != 1: raise ValueError('Unsupported pending snapshot state; explicit reconciliation required')
         if _digest(pending['package_manifest'])!=pending['package_manifest_sha256']: raise ValueError('Pending package manifest digest differs')
         _require_or_recover_head(api,release,statepath,state,primary)
@@ -321,9 +358,16 @@ def _publish(output, version, public):
     else:
         initial = summary.get('page_data_commit_before_documentation')
         if not re.fullmatch('[0-9a-f]{40}',str(initial)): raise ValueError('Missing frozen primary data commit')
-        _require_head(api, initial); _verify(api,initial,{},primary,exact=False)
+        previous_files=({REPORT:state['completed_snapshot']['package_manifest'][REPORT]}
+                        if completed_history is not None and REPORT not in local else {})
+        _require_head(api, initial); _verify(api,initial,previous_files,primary,exact=False)
+        if completed_history is not None:state['completed_snapshot_history']=completed_history
         pending={'schema':1,'version':version,'phase':'uploading','initial_remote_head':initial,'last_remote_head':initial,
                  'package_manifest':local,'package_manifest_sha256':_digest(local),'uploaded_paths':[],'inflight':None}
+        # The preceding generated verification report remains remotely until
+        # this version's final metadata commit replaces it. Bind that one path
+        # to the proven old manifest; no other stale remote path is admitted.
+        if previous_files:pending['previous_snapshot_files']=previous_files
         state['pending_snapshot']=pending;_save(statepath,state)
     if pending['phase']=='uploading':
         inflight=pending.get('inflight') or {}
@@ -338,7 +382,8 @@ def _publish(output, version, public):
             _verify(api,commit,{p:pending['package_manifest'][p] for p in batch},{},exact=False)
             pending['uploaded_paths'].extend(batch);pending['inflight']=None;_save(statepath,state)
         _local_unchanged(release,pending);_require_head(api,pending['last_remote_head'])
-        _verify(api,pending['last_remote_head'],pending['package_manifest'],primary)
+        initial_manifest={**pending.get('previous_snapshot_files',{}),**pending['package_manifest']}
+        _verify(api,pending['last_remote_head'],initial_manifest,primary)
         generated,final=_final_plan(release,pending,primary,version)
         pending.update(phase='materialize_final',generated_files=generated,final_manifest=final)
         _save(statepath,state)

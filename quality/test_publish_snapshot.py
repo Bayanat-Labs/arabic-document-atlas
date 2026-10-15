@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import shutil
 from types import SimpleNamespace as NS
 import tempfile
 import unittest
@@ -112,6 +113,24 @@ class Publisher(unittest.TestCase):
         files={**self.primary,**{str(f.relative_to(self.release)):f.read_bytes() for f in self.release.rglob('*') if f.is_file() and f.name!='SHA256SUMS'}}
         (self.release/'SHA256SUMS').write_text(''.join(f'{sha(data)}  {name}\n' for name,data in sorted(files.items())))
     def publish(self,public=False):return p.publish(self.output,'v0.1.0',public)
+    def next_package(self,version='v0.2.0'):
+        """Model the operator's archived old release and a fresh quiet package."""
+        old_version=json.loads((self.release/p.SUMMARY).read_text())['version']
+        archived=self.output/'snapshots'/old_version;archived.parent.mkdir(exist_ok=True)
+        self.release.replace(archived);shutil.copytree(archived,self.release)
+        # Model an additional builder-owned, verified shard before packaging.
+        name='data/pages/evicted-next.parquet';data=b'Original next-cohort primary engineering fixture'
+        self.api.external_commit(name,data);self.primary={**self.primary,name:data}
+        # A fresh release.package has no generated remote verification report.
+        (self.release/p.REPORT).unlink()
+        summary=json.loads((self.release/p.SUMMARY).read_text())
+        summary.update(version=version,page_data_commit_before_documentation=self.api.head,
+                       unique_image_pages=2,remote_community_sha256_verified=False,remote_reference_sha256_verified=False)
+        (self.release/p.SUMMARY).write_text(json.dumps(summary))
+        (self.release/'metadata/shards.json').write_text(json.dumps({'version':version,'shards':[
+            {'path':name,'sha256':sha(data),'bytes':len(data)} for name,data in self.primary.items()]}))
+        (self.release/'README.md').write_text('# Original next-version engineering fixture')
+        self.rechecksum();return archived
 
     def test_batched_protected_publish_verifies_all_components_before_public(self):
         result=self.publish(public=True)
@@ -266,6 +285,73 @@ class Publisher(unittest.TestCase):
         with p._publication_lock(self.output/'private/publish-snapshot.lock'):
             with self.assertRaisesRegex(ValueError,'Another snapshot publisher'):self.publish(public=True)
         self.assertFalse(self.api.uploads)
+
+    def test_second_version_preserves_first_tag_and_completed_proof_and_is_retryable(self):
+        first=self.publish(public=True);first_files=copy.deepcopy(self.api.commits[first['commit']])
+        completed=json.loads(self.state.read_text())['completed_snapshot'];archived=self.next_package()
+        self.assertTrue((archived/p.REPORT).is_file())
+        second=p.publish(self.output,'v0.2.0',True)
+        self.assertNotEqual(second['commit'],first['commit'])
+        self.assertEqual(self.api.tags,{'v0.1.0':first['commit'],'v0.2.0':second['commit']})
+        self.assertEqual(self.api.commits[first['commit']],first_files)
+        state=json.loads(self.state.read_text())
+        self.assertEqual(state['completed_snapshot_history'],[completed])
+        self.assertEqual(state['dataset_version'],'v0.2.0');self.assertEqual(state['pending_snapshot']['phase'],'complete')
+        calls=len(self.api.uploads);p.publish(self.output,'v0.2.0',True)
+        self.assertEqual(len(self.api.uploads),calls)
+        self.assertEqual(json.loads(self.state.read_text())['completed_snapshot_history'],[completed])
+
+    def test_interrupted_second_version_resumes_without_retiring_history_twice(self):
+        first=self.publish();completed=json.loads(self.state.read_text())['completed_snapshot'];self.next_package()
+        self.api.fail_before=self.api.attempts+2
+        with self.assertRaises(TimeoutError):p.publish(self.output,'v0.2.0',False)
+        state=json.loads(self.state.read_text());self.assertEqual(state['completed_snapshot_history'],[completed])
+        self.assertEqual(state['pending_snapshot']['version'],'v0.2.0')
+        self.assertEqual(set(state['pending_snapshot']['previous_snapshot_files']),{p.REPORT})
+        self.api.fail_before=None;p.publish(self.output,'v0.2.0',False)
+        self.assertEqual(self.api.tags['v0.1.0'],first['commit'])
+        self.assertEqual(json.loads(self.state.read_text())['completed_snapshot_history'],[completed])
+
+    def test_second_version_refuses_unfinished_mismatched_or_foreign_prior_proof(self):
+        self.publish();self.next_package();baseline=json.loads(self.state.read_text());tags=copy.deepcopy(self.api.tags)
+        calls=len(self.api.uploads)
+        for case in ('unfinished','commit','manifest','digest','completed','tag_missing','tag_changed','history'):
+            with self.subTest(case=case):
+                state=copy.deepcopy(baseline);self.api.tags=copy.deepcopy(tags)
+                if case=='unfinished':state['pending_snapshot']['phase']='tag_pending'
+                if case=='commit':state['dataset_commit']='0'*40
+                if case=='manifest':state['pending_snapshot']['package_manifest']['README.md']['bytes']+=1
+                if case=='digest':state['pending_snapshot']['package_manifest_sha256']='0'*64
+                if case=='completed':state['completed_snapshot']['version']='v9.9.9'
+                if case=='tag_missing':self.api.tags.pop('v0.1.0')
+                if case=='tag_changed':self.api.tags['v0.1.0']='1'*40
+                if case=='history':state['completed_snapshot_history']=[{**state['completed_snapshot'],'commit':'0'*40}]
+                self.state.write_text(json.dumps(state));before=self.state.read_bytes()
+                with self.assertRaisesRegex(ValueError,'unfinished|completed|Previous|history'):
+                    p.publish(self.output,'v0.2.0',True)
+                self.assertEqual(self.state.read_bytes(),before);self.assertEqual(len(self.api.uploads),calls)
+                self.assertNotIn('v0.2.0',self.api.tags)
+
+    def test_second_version_requires_new_initial_head_and_refuses_foreign_new_tag(self):
+        self.publish();self.next_package();state=self.state.read_bytes();calls=len(self.api.uploads)
+        self.api.tags['v0.2.0']=self.api.head
+        with self.assertRaisesRegex(ValueError,'outside owned'):p.publish(self.output,'v0.2.0',True)
+        self.assertEqual(self.state.read_bytes(),state);self.assertEqual(len(self.api.uploads),calls)
+        self.api.tags.pop('v0.2.0');self.api.external_commit('README.md',b'Concurrent outside engineering edit')
+        with self.assertRaisesRegex(ValueError,'HEAD changed'):p.publish(self.output,'v0.2.0',True)
+        self.assertEqual(self.state.read_bytes(),state);self.assertEqual(len(self.api.uploads),calls)
+
+    def test_second_version_does_not_allow_changed_prior_verification_report(self):
+        self.publish();self.next_package()
+        # This HEAD is explicitly bound by the new package, but the temporary
+        # old report must still match its completed version's exact hash.
+        self.api.external_commit(p.REPORT,b'Changed previous verification evidence')
+        summary=json.loads((self.release/p.SUMMARY).read_text());summary['page_data_commit_before_documentation']=self.api.head
+        (self.release/p.SUMMARY).write_text(json.dumps(summary));self.rechecksum()
+        before=self.state.read_bytes();calls=len(self.api.uploads)
+        with self.assertRaisesRegex(ValueError,'Remote.*mismatch'):p.publish(self.output,'v0.2.0',True)
+        self.assertNotIn('v0.2.0',self.api.tags);self.assertFalse(self.api.public_calls)
+        self.assertEqual(self.state.read_bytes(),before);self.assertEqual(len(self.api.uploads),calls)
 
 
 if __name__=='__main__':unittest.main()

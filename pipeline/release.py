@@ -32,7 +32,7 @@ explorer/README.md explorer/index.html explorer/style.css explorer/app.js
 pipeline/build_pages.py pipeline/build_report.py pipeline/evict_inputs.py pipeline/package_explorer.py pipeline/publish_explorer.py pipeline/release.py pipeline/vision_ocr.swift
 quality/BUILDER_VALIDATION.md quality/QUALITY_CONTRACT.md quality/__init__.py quality/page.schema.json quality/source_metadata_notes.json
 quality/test_build_pages.py quality/test_build_report.py quality/test_validate.py quality/validate.py'''.split()
-OPTIONAL_SOURCE_FILES = ['pipeline/build_reference_pairs.py','pipeline/REFERENCE_PAIRS.md',
+OPTIONAL_SOURCE_FILES = ['pipeline/build_reference_pairs.py','pipeline/REFERENCE_PAIRS.md','pipeline/NEXT_SNAPSHOT.md',
     'pipeline/release_components.py','pipeline/publish_snapshot.py',
     'quality/test_reference_pairs.py','quality/test_release.py','quality/test_release_components.py',
     'quality/test_publish_snapshot.py','quality/test_publish_explorer.py','quality/test_release_integration.py']
@@ -233,8 +233,9 @@ def package(output, books, community, version, references=None):
             raise ValueError('Coverage report does not match this quiet snapshot')
         for filename in ['coverage.json','COVERAGE.md']:
             shutil.copy2(output/'reports'/filename,release/'reports'/filename)
-        first_audit=output/'reports/first-remote-shard-audit.json'
-        if first_audit.exists():shutil.copy2(first_audit,release/'reports'/first_audit.name)
+        for name in ['first-remote-shard-audit.json','additional-remote-shards-audit.json']:
+            audit=output/'reports'/name
+            if audit.exists():shutil.copy2(audit,release/'reports'/audit.name)
         for name in ['DATA_LICENSE.md','ATTRIBUTION.md','LICENSE','CITATION.cff']:
             shutil.copy2(SOURCE/name,release/name)
         for name in [n for n in SOURCE_FILES if n.startswith('docs/')]:
