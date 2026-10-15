@@ -35,7 +35,8 @@ quality/test_build_pages.py quality/test_build_report.py quality/test_validate.p
 OPTIONAL_SOURCE_FILES = ['pipeline/build_reference_pairs.py','pipeline/REFERENCE_PAIRS.md','pipeline/NEXT_SNAPSHOT.md',
     'pipeline/release_components.py','pipeline/publish_snapshot.py',
     'quality/test_reference_pairs.py','quality/test_release.py','quality/test_release_components.py',
-    'quality/test_publish_snapshot.py','quality/test_publish_explorer.py','quality/test_release_integration.py']
+    'quality/test_publish_snapshot.py','quality/test_publish_explorer.py','quality/test_release_integration.py',
+    'audit/audit_remote_shards.py']
 
 def dump(path, value):
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
@@ -235,7 +236,10 @@ def package(output, books, community, version, references=None):
             shutil.copy2(output/'reports'/filename,release/'reports'/filename)
         for name in ['first-remote-shard-audit.json','additional-remote-shards-audit.json']:
             audit=output/'reports'/name
-            if audit.exists():shutil.copy2(audit,release/'reports'/audit.name)
+            if audit.exists():
+                if name=='additional-remote-shards-audit.json' and json.loads(audit.read_text()).get('status')!='passed':
+                    raise ValueError('Additional independent remote audit has not passed')
+                shutil.copy2(audit,release/'reports'/audit.name)
         for name in ['DATA_LICENSE.md','ATTRIBUTION.md','LICENSE','CITATION.cff']:
             shutil.copy2(SOURCE/name,release/name)
         for name in [n for n in SOURCE_FILES if n.startswith('docs/')]:
