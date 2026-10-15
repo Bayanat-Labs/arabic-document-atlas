@@ -73,8 +73,17 @@ def package(output, books, community, version):
     if state.get('repo_id')!=REPO or not state.get('dataset_created'):raise ValueError('Builder-owned publication state required')
     remote=api.repo_info(REPO,repo_type='dataset',files_metadata=True)
     indexed={s.rfilename:s for s in remote.siblings}
-    if {s['path'] for s in shards}!={name for name in indexed if name.startswith('data/') and name.endswith('.parquet')}:
+    if {s['path'] for s in shards}!={name for name in indexed if name.startswith(('data/pages/','data/duplicate_occurrences/')) and name.endswith('.parquet')}:
         raise ValueError('Remote data paths differ from the quiet build snapshot; stop the builder before packaging')
+    remote_community={name for name in indexed if name.startswith('data/community_text/') and name.endswith('.parquet')}
+    if remote_community:
+        if not community:raise ValueError('Existing community data require an explicitly verified package')
+        community_root=Path(community).resolve()
+        expected_community={str(p.relative_to(community_root)):p for p in (community_root/'data/community_text').glob('*.parquet')}
+        if remote_community!=set(expected_community):raise ValueError('Remote community files differ from the supplied package')
+        for name,path in expected_community.items():
+            if not indexed[name].lfs or indexed[name].lfs.sha256!=sha(path) or indexed[name].size!=path.stat().st_size:
+                raise ValueError('Existing remote community shard hash mismatch')
     for shard in shards:
         entry=indexed.get(shard['path'])
         if entry is None or not entry.lfs or entry.lfs.sha256!=shard['sha256'] or entry.size!=shard['bytes']:
@@ -161,6 +170,8 @@ def package(output, books, community, version):
         raise ValueError('Coverage report does not match this quiet snapshot')
     for filename in ['coverage.json','COVERAGE.md']:
         shutil.copy2(output/'reports'/filename,release/'reports'/filename)
+    first_audit=output/'reports/first-remote-shard-audit.json'
+    if first_audit.exists():shutil.copy2(first_audit,release/'reports'/first_audit.name)
     for name in ['DATA_LICENSE.md','ATTRIBUTION.md','LICENSE','CITATION.cff']:
         shutil.copy2(SOURCE/name,release/name)
     shutil.copytree(SOURCE/'docs',release/'docs',dirs_exist_ok=True)

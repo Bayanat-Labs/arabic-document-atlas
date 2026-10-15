@@ -20,12 +20,12 @@ do not independently establish the date or rights of every work in a bound volum
 Each selected publisher high-resolution PDF is downloaded with a bounded size,
 hashed and pinned to its document state. PDF page count must equal manifest
 canvas count. The raster is rendered with PDFium to RGB, with a long edge at
-most 2400 pixels, then encoded as JPEG quality90. These settings do not certify
+most 2400 pixels, then encoded as JPEG quality 90. These settings do not certify
 scanner DPI or native source resolution. The PDF hash and zero-based page index
 identify the processed input. Canvas association follows the publisher's order;
 equal counts do not independently verify every PDF/canvas pair.
 
-Apple Vision revision3 recognizes Arabic and English with accurate recognition,
+Apple Vision revision 3 recognizes Arabic and English with accurate recognition,
 language correction disabled and automatic language detection disabled. Word
 boundaries follow non-whitespace spans in the engine candidate string. Vision
 provides approximate character-range word guides; lines contain the union of
@@ -34,7 +34,7 @@ is retained. Text is reconstructed from every associated word without silently
 dropping failed localizations. A page with missing/invalid localization is
 quarantined and recorded as a failed attempt.
 
-The native worker has a60-second response deadline and is restarted after a
+The native worker has a 60-second response deadline and is restarted after a
 timeout. PDFium rasterization runs under a process-local render lock because
 the library is not thread safe; OCR workers run concurrently. Rasterization is
 in-process and has no separate per-page timeout in this version.
@@ -72,7 +72,7 @@ their inventory hashes recorded. Failed attempts never erase existing bindings.
 ## Community text
 
 The Arabic Wikisource client retains exact page revisions, wikitext, source
-quality3/4 and exact file-rights metadata. It verifies independent source quality
+quality 3/4 and exact file-rights metadata. It verifies independent source quality
 fields and revision hashes. MediaWiki rendering preserves template-based text
 that would be lost by blindly deleting wikitext. Multi-page batches require
 correct wrapper/revision alignment; problematic source markup falls back to

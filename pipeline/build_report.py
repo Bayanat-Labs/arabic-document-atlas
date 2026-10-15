@@ -92,17 +92,17 @@ def throughput(log_path,expected):
     for line in Path(log_path).read_text().splitlines():
         try:item=json.loads(line)
         except (ValueError,TypeError):ignored+=1;continue
-        if item.get('stage')=='progress':records.append(item)
+        if isinstance(item,dict) and item.get('stage')=='progress':records.append(item)
     segments=[];current=[]
     for item in records:
         required=('elapsed_seconds','pages','processed_source_occurrences','words','shards','updated_utc')
         if any(k not in item for k in required):continue
         try:
             elapsed=float(item['elapsed_seconds']);stamp=datetime.fromisoformat(item['updated_utc'].replace('Z','+00:00'))
-            if not math.isfinite(elapsed) or elapsed<0:continue
+            if not math.isfinite(elapsed) or elapsed<0 or stamp.tzinfo is None:continue
             if any(not isinstance(item[k],int) or item[k]<0 for k in ('pages','processed_source_occurrences','words','shards')):continue
         except (ValueError,TypeError):continue
-        item={**item,'_timestamp':stamp}
+        item={**item,'elapsed_seconds':elapsed,'_timestamp':stamp}
         if current and (elapsed<current[-1]['elapsed_seconds'] or stamp<current[-1]['_timestamp'] or any(item[k]<current[-1][k] for k in ('pages','processed_source_occurrences','words','shards'))):
             segments.append(current);current=[]
         current.append(item)
@@ -127,7 +127,7 @@ def collect_report(output,books_path,progress_log=None):
     try:
         start_version=db.execute('PRAGMA data_version').fetchone()[0];db.execute('BEGIN')
         bindings={r['document_id']:dict(r) for r in db.execute('SELECT * FROM documents')}
-        if any(r['status']=='processing' for r in bindings.values()):raise ValueError('Build is not quiet: a document is processing')
+        if any(r['status'] not in {'complete','partial','error'} for r in bindings.values()):raise ValueError('Build is not quiet: a document is pending or processing')
         shards=[dict(r) for r in db.execute('SELECT * FROM shards ORDER BY path')]
         if any(not r['uploaded'] for r in shards):raise ValueError('Build is not ready: unverified/unuploaded shards remain')
         books={}
@@ -146,6 +146,17 @@ def collect_report(output,books_path,progress_log=None):
         occurrences=[dict(r) for r in db.execute('SELECT * FROM occurrences ORDER BY page_id')]
         page_map={r['page_id']:r for r in pages};occ_map={(r['document_id'],r['page_index']):r for r in occurrences}
         duplicates=[r for r in occurrences if r['is_duplicate']]
+        if len(occ_map)!=len(occurrences):raise ValueError('Repeated source document/page occurrence')
+        for row in occurrences:
+            if row['is_duplicate'] not in (0,1):raise ValueError('Invalid duplicate flag')
+            if not row['is_duplicate'] and (row['page_id']!=row['retained_page_id'] or row['page_id'] not in page_map):
+                raise ValueError('Retained occurrence must point to its own image')
+            if row['is_duplicate'] and row['page_id'] in page_map:raise ValueError('Duplicate occurrence cannot also be a retained image')
+            if not isinstance(row['page_index'],int) or row['page_index']<0 or bindings[row['document_id']]['pages'] is None or row['page_index']>=bindings[row['document_id']]['pages']:
+                raise ValueError('Occurrence index is outside bound source PDF')
+        for row in pages:
+            own=occ_map.get((row['document_id'],row['page_index']))
+            if own is None or own['is_duplicate'] or own['page_id']!=row['page_id']:raise ValueError('Retained image is missing its own source occurrence')
         if len(occurrences)!=len(pages)+len(duplicates):raise ValueError('Retained/duplicate occurrence totals disagree')
         if len({r['pixel_sha256'] for r in pages})!=len(pages):raise ValueError('Retained exact pixel hashes are not unique')
         if any(r['retained_page_id'] not in page_map or r['pixel_sha256']!=page_map[r['retained_page_id']]['pixel_sha256'] for r in occurrences):raise ValueError('Occurrence points to an absent or different retained image')
@@ -169,6 +180,8 @@ def collect_report(output,books_path,progress_log=None):
         text_duplicates=[(key,rows) for key,rows in text_groups.items() if len(rows)>1]
         histogram={label:sum(low<=r['words']<=high for r in pages) for label,low,high in [('0',0,0),('1-19',1,19),('20-99',20,99),('100-299',100,299),('300-599',300,599),('600+',600,10**12)]}
         config_path=output/'private/processing-config.json';config=json.loads(config_path.read_text())
+        calculated_config_sha=hashlib.sha256(json.dumps(config['config'],sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest()
+        if config['processing_config_sha256']!=calculated_config_sha:raise ValueError('Processing configuration hash mismatch')
         # Hash the actual ordered analysis input, not the mutable SQLite/WAL files.
         digest=hashlib.sha256()
         for name,rows in [('documents',sorted(bindings.values(),key=lambda r:r['document_id'])),('pages',pages),('occurrences',occurrences),('shards',shards),('failures',failures)]:
@@ -189,7 +202,7 @@ def collect_report(output,books_path,progress_log=None):
             'mechanical_screen':{'passed_retained_images':screened,'denominator_retained_images':len(pages),'pass_share':screened/len(pages) if pages else None,
                                  'policy':'At least20 words, Arabic-script letter fraction>=0.5, replacement-character fraction<=0.005, no disallowed private-use/bidi review flags, valid geometry/provenance and verified image bytes.',
                                  'caveat':'Mechanical text/script/encoding selection only. Not measured OCR accuracy, language identification, calibrated confidence, manual review or gold labels.'},
-            'provider_coverage':coverage(books,counts,providers=True),'catalog_publication_year_coverage':coverage(books,counts),
+            'provider_coverage':coverage(books,counts,providers=True),'catalog_publication_year_coverage':{**coverage(books,counts),'source_year_policy':'Catalog-metadata triage only; not independently verified publication dates for every work or page in a bound/scanned volume.'},
             'duplicates':{'exact_pixel_duplicate_occurrences':len(duplicates),'exact_pixel_group_count':len({r['pixel_sha256'] for r in duplicates}),
                           'exact_pixel_duplicate_share_of_successful_occurrences':len(duplicates)/len(occurrences) if occurrences else None,
                           'normalized_long_text_duplicate_groups':len(text_duplicates),'retained_images_in_text_duplicate_groups':sum(len(rows) for _,rows in text_duplicates),

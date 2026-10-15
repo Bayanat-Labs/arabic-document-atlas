@@ -1,6 +1,7 @@
 """Hand-calculated engineering ledger, not fabricated corpus observations."""
 from __future__ import annotations
 import gzip
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -37,7 +38,9 @@ def fixture(output):
     for doc,index,error in [('a',1,'Native OCR failed: Invalid input range'),('c',0,'Native OCR exceeded60s timeout'),('b',2,'bad_unicode'),('b',2,'bbox_outside_image')]:
         db.execute('INSERT INTO failures VALUES (?,?,?,?)',(doc,index,error,'2026-10-15T22:00:00Z'))
     db.commit();db.close()
-    (private/'processing-config.json').write_text(json.dumps({'processing_config_sha256':'c'*64}))
+    config={'fixture':'source-independent-engineering-only'}
+    config_sha=hashlib.sha256(json.dumps(config,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+    (private/'processing-config.json').write_text(json.dumps({'processing_config_sha256':config_sha,'config':config}))
     inventory=output/'books.jsonl.gz'
     with gzip.open(inventory,'wt') as stream:
         for book in books:stream.write(json.dumps(book)+'\n')
