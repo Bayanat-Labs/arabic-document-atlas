@@ -77,6 +77,18 @@ class CommunityPackage(unittest.TestCase):
         page["source_scan_available"] = False
         self.assertIsNone(package.classify_and_join(page, rendered, file)[0])
 
+    def test_pdf_design_license_conflict_does_not_claim_body_text_clearance_for_images(self):
+        page, rendered, file = fixture()
+        file['source_file_info']['sha1'] = 'ae04efe19611e6917ec0388c9293b4c05976795d'
+        file['source_file_info']['pagecount'] = 34
+        page['scan_page_number'] = 7
+        row, reason = package.classify_and_join(page, rendered, file)
+        self.assertIsNone(reason)
+        self.assertIn('scan_image_redistribution_held_pdf_license_conflict', row['quality_flags'])
+        self.assertFalse(row['contains_image_bytes'])
+        page['scan_page_number'] = 34
+        self.assertEqual(package.classify_and_join(page, rendered, file)[1], 'non_work_modern_publisher_colophon')
+
     def test_render_errors_empty_text_and_out_of_range_excluded(self):
         page, rendered, file = fixture()
         for flag in ("source_parser_error_element", "source_parser_missing_template"):
@@ -110,15 +122,28 @@ class CommunityPackage(unittest.TestCase):
             rendered['raw_response_sha256'] = package.digest(source / rendered['raw_response_path'])
             gz('rendered/batch.jsonl.gz', rendered); gz('pages/quality-4/batch.jsonl.gz', page)
             gz('files/batch.jsonl.gz', file)
+            held_page, held_render, held_file = copy.deepcopy(page), copy.deepcopy(rendered), copy.deepcopy(file)
+            held_page.update(source_page_id=2, source_revision_id=3, scan_filename='held.pdf',
+                             record_id='arws-' + hashlib.sha256(b'arwikisource:2:3').hexdigest())
+            held_render.update(record_id=held_page['record_id'], source_revision_id=3)
+            held_file.update(scan_filename='held.pdf', rights_review_status='review_required_contradictory_life_term_evidence',
+                             rights_evidence_flags=['source_pd_old_70_conflicts_with_source_creator_death_1958'], rights_review_year=2026)
+            gz('pages/quality-4/held.jsonl.gz', held_page); gz('rendered/held.jsonl.gz', held_render)
+            gz('files/held.jsonl.gz', held_file)
             gz('raw/siteinfo.json.gz', {'fetched_at':'now','response':{'query':{'rightsinfo':{'url':page['text_license_url']}, 'proofreadqualitylevels':[], 'proofreadnamespaces':{}}}})
             js('independent-inventory-qc.json', {'status':'passed'})
-            js('render-summary.json', {'all_cached_eligible_pages_rendered':True,'counts':{'rendered_pages':1}})
-            js('summary.json', {'counts':{'eligible_source_quality':1}})
+            js('render-summary.json', {'all_cached_eligible_pages_rendered':True,'counts':{'rendered_pages':2}})
+            js('summary.json', {'counts':{'eligible_source_quality':2}})
             report = package.package(source, output, rows_per_shard=1)
             self.assertEqual(report['split'], 'train')
             self.assertFalse(report['contains_image_bytes'])
             self.assertFalse(report['is_heldout_benchmark'])
             self.assertEqual(report['counts']['published_text_records'], 1)
+            rights = json.loads((output / 'reports/wikisource-rights-exclusions.json').read_text())
+            self.assertEqual(rights['excluded_source_files'], 1)
+            self.assertEqual(rights['records_excluded_at_rights_gate'], 1)
+            self.assertEqual(rights['files'][0]['scan_filename'], 'held.pdf')
+            self.assertEqual(rights['files'][0]['source_rights_assertions'], held_file['source_file_info']['extmetadata'])
             public = next(package.rows((output / 'metadata/wikisource').glob('scan_files.jsonl.gz')))
             self.assertNotIn('raw_response_path', public)
             self.assertEqual(package.digest(output / report['data_files'][0]['path']), report['data_files'][0]['sha256'])

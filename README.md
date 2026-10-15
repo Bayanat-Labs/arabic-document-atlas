@@ -1,7 +1,8 @@
 # Bayanat Arabic Document Atlas
 
-Authentic Arabic scanned pages with embedded JPEG images, machine OCR,
-approximate word guides, source-version hashes and quality reports.
+Authentic Arabic document images with embedded JPEG bytes, machine OCR,
+approximate word guides, source-version hashes, community reference text and
+quality reports.
 
 [Dataset](https://huggingface.co/datasets/Bayanat-Labs/arabic-document-atlas) ·
 [Visual explorer](https://huggingface.co/spaces/Bayanat-Labs/arabic-document-atlas) ·
@@ -11,6 +12,8 @@ The published dataset card and pinned `metadata/release-summary.json` are the
 authority for completed counts. A discovered catalog record or source canvas
 is not a downloaded unique image. Word records, image variants and the separate
 community-text tier are not added to the image-page count.
+The total document-image count uses the union of decoded-pixel hashes across
+the main scan and smaller reference-pair components.
 
 ## Why it exists
 
@@ -42,6 +45,8 @@ image = page["image"]
 See [usage and field semantics](docs/USAGE.md),
 [quality contract](quality/QUALITY_CONTRACT.md) and
 [source-rights audit](audit/SOURCE_RIGHTS_AND_QUALITY.md).
+See [compute, storage and snapshot scaling](docs/SCALING.md) for the measured
+native path and its limits.
 
 ## Rebuild
 
@@ -84,6 +89,10 @@ do not silently mix OCR model versions into an existing snapshot.
 - The community-text configuration contains revision-attributed text and scan
   references, without image bytes or verified word boxes. Its proofread status
   is the source community's status, not a new Bayanat accuracy certification.
+- `reference_pairs` adds source-associated PDF page images for a narrower
+  permission-backed subset of those transcriptions. Source quality 3/4 is
+  preserved. Some PDF pages are born digital; body text can omit headers and
+  footers. No independently certified visual alignment or OCR boxes are supplied.
 - Rights are component-specific. The image policy uses source institutional
   public-domain assertions and an edition-date triage rule, not worldwide clearance.
 

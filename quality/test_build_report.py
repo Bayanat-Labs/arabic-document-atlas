@@ -51,7 +51,9 @@ class ReportSemanticsTests(unittest.TestCase):
     def setUp(self):self.tmp=tempfile.TemporaryDirectory();self.output=Path(self.tmp.name);self.books=fixture(self.output)
     def tearDown(self):self.tmp.cleanup()
     def mutate(self,sql):
-        with sqlite3.connect(self.output/'private/build.sqlite') as db:db.execute(sql)
+        db=sqlite3.connect(self.output/'private/build.sqlite')
+        try:db.execute(sql);db.commit()
+        finally:db.close()
 
     def test_hand_calculated_source_weights_screen_duplicates_and_failure_resolution(self):
         report=r.collect_report(self.output,self.books)
@@ -124,5 +126,18 @@ class ReportSemanticsTests(unittest.TestCase):
         self.assertAlmostEqual(result['retained_unique_images_per_second'],.2)
         self.assertEqual(result['earlier_run_segments_not_combined'],1)
         self.assertFalse(r.throughput(log,{'pages':8,'processed_source_occurrences':8,'words':800,'shards':8})['available'])
+
+    def test_restart_with_larger_elapsed_is_detected_by_inferred_run_origin(self):
+        log=self.output/'late-first-observation.log'
+        points=[]
+        for timestamp,elapsed,n in [('22:00:05',5,10),('22:00:10',10,20),('22:11:00',60,30),('22:12:00',120,40)]:
+            points.append({'stage':'progress','elapsed_seconds':elapsed,'pages':n,'processed_source_occurrences':n,'words':n*100,'shards':n,'updated_utc':f'2026-10-15T{timestamp}Z'})
+        log.write_text('\n'.join(json.dumps(x) for x in points))
+        result=r.throughput(log,{'pages':40,'processed_source_occurrences':40,'words':4000,'shards':40})
+        self.assertTrue(result['available']);self.assertEqual(result['detected_run_segments'],2)
+        self.assertEqual(result['new_retained_unique_images'],10)
+        self.assertEqual(result['observed_interval_seconds'],60)
+        self.assertAlmostEqual(result['retained_unique_images_per_second'],10/60)
+        self.assertEqual(result['omitted_initial_elapsed_seconds'],60)
 
 if __name__=='__main__':unittest.main()

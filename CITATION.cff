@@ -3,7 +3,8 @@ message: "Please cite the exact dataset revision and credit the original source 
 type: dataset
 title: "Bayanat Arabic Document Atlas"
 authors:
-  - family-names: "Bayanat Labs"
+  - name: "Bayanat Labs"
+version: 0.1.0
 url: "https://www.bayanatlabs.com/open/arabic-document-atlas"
 repository-code: "https://github.com/Bayanat-Labs/arabic-document-atlas"
 repository-artifact: "https://huggingface.co/datasets/Bayanat-Labs/arabic-document-atlas"

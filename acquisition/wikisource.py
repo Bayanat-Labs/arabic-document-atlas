@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import hashlib
+import html
 import json
 import re
 import shutil
@@ -263,11 +264,54 @@ def rights_classification(metadata):
         return "review_required_restrictions"
     if re.search(r"\bnc\b|\bnd\b|noncommercial|no.?derivative|fair.?use", joined):
         return "excluded_restrictive_terms"
+    flags = rights_evidence_flags(metadata)
+    if any(flag.startswith("source_pd_old_") for flag in flags):
+        return "review_required_contradictory_life_term_evidence"
+    if flags:
+        return "review_required_related_author_pd_assertion"
     if "public domain" in joined or code.lower() in ("pd", "cc-zero", "cc0"):
         return "source_asserted_public_domain"
     if re.search(r"creativecommons.org/licenses/by(?:-sa)?/", url) or re.fullmatch(r"cc-by(?:-sa)?(?:-[1-4]\.0)?", code.lower()):
         return "source_asserted_open_license"
     return "review_required_missing_or_unrecognized_terms"
+
+
+RIGHTS_REVIEW_YEAR = 2026
+# Narrow, evidence-triggered review holds. These are exact source author
+# identifiers, not filename/subject matches or a claim that every work is unlawful.
+# The linked PD-old-70 contradictions led to review of these authors' other
+# PD-asserted works; no independent multinational clearance was performed.
+REVIEWED_AUTHOR_PD_HOLDS = {
+    "Abbas_Mahmoud_al-Aqqad": ("عباس العقاد", "عباس محمود العقاد", "Abbas el-Akkad"),
+    "Salama_Moussa": ("سلامة موسى", "Salama Musa"),
+}
+
+
+def rights_evidence_flags(metadata, year=None):
+    """Hold affirmative contradictions within source metadata, not legal clearance.
+
+    A source PD-old-N claim and source creator life dates cannot disagree about
+    whether N calendar years have elapsed. Missing dates are not guessed.
+    """
+    year = RIGHTS_REVIEW_YEAR if year is None else year
+    categories = str(metadata.get("Categories", {}).get("value", ""))
+    artist = html.unescape(str(metadata.get("Artist", {}).get("value", "")))
+    terms = [int(value) for value in re.findall(r"PD-old-(\d+)", categories, re.I)]
+    lives = re.findall(r"(?<!\d)(\d{3,4})\s*[–—-]\s*(\d{3,4})(?!\d)", artist)
+    flags = []
+    for birth, death in lives:
+        birth, death = int(birth), int(death)
+        if terms and 1000 <= birth < death <= year and year - death <= max(terms):
+            flags.append(f"source_pd_old_{max(terms)}_conflicts_with_source_creator_death_{death}")
+    code = str(metadata.get("License", {}).get("value", "")).lower()
+    short = str(metadata.get("LicenseShortName", {}).get("value", "")).lower()
+    plain_artist = BeautifulSoup(artist, "html.parser").get_text(" ", strip=True)
+    if code == "pd" or "public domain" in short:
+        for author, aliases in REVIEWED_AUTHOR_PD_HOLDS.items():
+            if (re.search(r'https?://en\.wikipedia\.org/wiki/(?:en:)?' + re.escape(author) + r'(?:["#?]|$)', artist)
+                    or plain_artist in aliases):
+                flags.append("reviewed_author_pd_assertion_requires_manual_clearance:" + author)
+    return sorted(set(flags))
 
 
 def acquire_file_descriptions(output, client, names):
@@ -320,6 +364,8 @@ def acquire_files(output, client):
                          "image_repository": page.get("imagerepository"),
                          "source_file_info": info,
                          "rights_review_status": rights_classification(metadata),
+                         "rights_evidence_flags": rights_evidence_flags(metadata),
+                         "rights_review_year": RIGHTS_REVIEW_YEAR,
                          "rights_independently_verified": False,
                          "source_linked_aco_book_ids": linked_aco,
                          "cross_source_match_basis": "ACO identifier present in source file credit/description with NYU domain; correspondence not independently verified",

@@ -149,6 +149,26 @@ class SourceSemantics(unittest.TestCase):
         self.assertEqual(ws.rights_classification(metadata(LicenseUrl="https://creativecommons.org/licenses/by-sa/4.0/")), "source_asserted_open_license")
         self.assertEqual(ws.rights_classification(metadata(License="pd", Restrictions="trademark")), "review_required_restrictions")
 
+    def test_source_life_date_can_contradict_its_own_pd_old_claim(self):
+        metadata = {"License": {"value":"pd"}, "Categories":{"value":"PD-scan (PD-old-70)"},
+                    "Artist":{"value":'<span title="Writer (1887–1958)">Author</span>'}}
+        self.assertEqual(ws.rights_evidence_flags(metadata, year=2026), ['source_pd_old_70_conflicts_with_source_creator_death_1958'])
+        self.assertEqual(ws.rights_classification(metadata), 'review_required_contradictory_life_term_evidence')
+        metadata['Artist']['value']='<span title="Writer (1787–1858)">Author</span>'
+        self.assertEqual(ws.rights_evidence_flags(metadata, year=2026), [])
+        self.assertEqual(ws.rights_classification(metadata), 'source_asserted_public_domain')
+
+    def test_related_author_hold_uses_author_evidence_not_filename_or_subject(self):
+        def metadata(artist, license='pd'):
+            return {'License': {'value':license}, 'Artist': {'value':artist}}
+        artist = '<a href="https://en.wikipedia.org/wiki/en:Abbas_Mahmoud_al-Aqqad">Abbas el-Akkad</a>'
+        self.assertEqual(ws.rights_classification(metadata(artist)), 'review_required_related_author_pd_assertion')
+        self.assertEqual(ws.rights_classification(metadata('عباس العقاد')), 'review_required_related_author_pd_assertion')
+        self.assertEqual(ws.rights_classification(metadata(artist, 'cc-by-4.0')), 'source_asserted_open_license')
+        unrelated = metadata("Mostafa Saadeq Al-Rafe'ie")
+        unrelated['ImageDescription'] = {'value': 'A critique of عباس العقاد by a different author'}
+        self.assertEqual(ws.rights_classification(unrelated), 'source_asserted_public_domain')
+
     def test_aco_rejects_malformed_identity_and_dimensions(self):
         for dimension in (0, -1, True, 20.1, "2000", None):
             value = manifest(); value["items"][0]["width"] = dimension

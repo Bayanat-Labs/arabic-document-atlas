@@ -31,6 +31,21 @@ text. Underlying public-domain works retain that status. Referenced scan files
 have separate file-specific rights; this configuration does not contain their
 image bytes and the text license does not license those images.
 
+## Reference-pair images and included original PDFs
+
+The initial `reference_pairs` image cohort and its two original source PDFs are
+redistributed under their file-specific
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) assertions, with
+preserved copyright-holder permission evidence. Retain the file's author,
+credit, attribution, source and license links; indicate changes and comply with
+share-alike for adaptations. Rendering/resizing and JPEG encoding are disclosed
+transformations. `metadata/reference-pairs-source-files.jsonl.gz` and the exact
+source-description revisions preserve the original credit and notice evidence.
+Originals under `source/reference_pdfs/` are named by source SHA1; their SHA256,
+size and page count are recorded in metadata. The paired community transcription
+has the separate CC BY-SA 4.0 text terms described above. Neither source
+permission evidence nor the project's checks imply institutional endorsement.
+
 ## Code and dependencies
 
 Original pipeline and explorer code are Apache-2.0, as set out in `LICENSE`.

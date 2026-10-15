@@ -86,6 +86,26 @@ and references without scan-image bytes, line boxes or independent Bayanat
 proofreading. All first-release data use the `train` loading split; no held-out
 evaluation or work/edition isolation is claimed.
 
+## Reference-pair images
+
+The initial reference cohort adds original-PDF page renders only where the
+community record has source quality 3/4, a compatible file-specific CC license,
+copyright-holder permission evidence and an observed binary version that does
+not postdate the text revision. Known ACO links, unknown/postdated versions and
+conflicting image-rights evidence are held. Every original PDF must match source
+SHA1, exact byte size and page count; its SHA256 is also recorded. The first
+twelve pages receive a native-text negative restriction screen. That screen
+cannot clear image-only or later notices, and is not worldwide legal clearance.
+
+Pages are rendered with PDFium at the same 2400-pixel/JPEG90 settings. Some PDFs
+are born digital. Source Page numbering associates image and body transcription;
+no new OCR, word boxes or independent visual alignment labels are generated.
+The preserved community text excludes some headers and footers. The paired text
+also occurs in `community_text` and is not counted as an additional transcription.
+The union of decoded-pixel hashes across both image components supplies the
+headline unique-image count; cross-component overlap is reported separately.
+Original permitted PDFs and sanitized source/notice proofs accompany the release.
+
 ## Reproduction and interpretation
 
 Use the immutable Hub version tag, `SHA256SUMS`, shard manifest and processing

@@ -51,6 +51,25 @@ SCHEMA = pa.schema([
     ("source_fetched_at", pa.string()), ("rendered_at", pa.string()),
 ])
 
+# Frozen source-PDF evidence overrides metadata for image redistribution while
+# preserving the distinction between edition design and underlying body text.
+IMAGE_RIGHTS_HOLDS = {
+    "ae04efe19611e6917ec0388c9293b4c05976795d": {
+        "source_pdf_sha256": "e7f186b88d7b36651e8e696153bb317287def2c12b186ed71445228b4655f4e8",
+        "source_pdf_notice_page_number": 4,
+        "restricted_components": ["edition_design", "cover_artwork"],
+        "observed_design_license": "CC-BY-NC-ND-4.0",
+        "observed_design_license_url": "https://creativecommons.org/licenses/by-nc-nd/4.0/",
+        "underlying_text_notice": "The frozen PDF notice states all other rights relating to the work are public domain.",
+        "source_metadata_conflict": "Commons asserted CC-BY-4.0; the actual frozen PDF separately restricts design and cover.",
+        "image_redistribution_held": True,
+        "text_scope_policy": "Retain original-work body text; omit source PDF page34 publisher-only wordmark as non-work content, without asserting copyright in a single word.",
+        "non_work_page_numbers": [34]}}
+
+
+def image_rights_hold(file):
+    return IMAGE_RIGHTS_HOLDS.get(file['source_file_info'].get('sha1'))
+
 
 def dumps(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -78,8 +97,11 @@ def classify_and_join(page, rendered, file):
     if not page.get("source_scan_available") or file is None:
         return None, "missing_scan_association_or_file_evidence"
     if file["rights_review_status"] not in ("source_asserted_public_domain", "source_asserted_open_license"):
-        return None, "unrecognized_or_restrictive_scan_rights"
+        return None, "scan_rights_" + file["rights_review_status"]
     info = file["source_file_info"]
+    image_hold = image_rights_hold(file)
+    if image_hold and page['scan_page_number'] in image_hold['non_work_page_numbers']:
+        return None, 'non_work_modern_publisher_colophon'
     pagecount = info.get("pagecount")
     pagecount_basis = "source_imageinfo_pagecount"
     if pagecount is None and info.get("mime") in ("image/jpeg", "image/png"):
@@ -108,6 +130,8 @@ def classify_and_join(page, rendered, file):
     timestamp = info.get("timestamp")
     postdates = bool(timestamp and timestamp > page["source_revision_timestamp"])
     flags = list(render_flags)
+    if image_hold:
+        flags.append('scan_image_redistribution_held_pdf_license_conflict')
     if postdates:
         flags.append("current_scan_version_postdates_text_revision")
     if len(text) < 80:
@@ -165,6 +189,7 @@ def package(source, output, rows_per_shard=2000):
     files = {r["scan_filename"].replace("_", " "): r for r in rows(source.glob("files/*.jsonl.gz"))}
     counts, excluded, quality_counts, flags = Counter(), Counter(), Counter(), Counter()
     used_files, seen = set(), set()
+    source_file_pages, rights_excluded_pages = Counter(), Counter()
     checked_data = []
     batch = []
     def flush():
@@ -203,9 +228,13 @@ def package(source, output, rows_per_shard=2000):
             record = conn.execute("SELECT payload FROM rendered WHERE id=?", (page["record_id"],)).fetchone()
             rendered = json.loads(record[0]) if record else None
             file = files.get((page.get("scan_filename") or "").replace("_", " "))
+            if file is not None:
+                source_file_pages[file["scan_filename"].replace("_", " ")] += 1
             row, reason = classify_and_join(page, rendered, file)
             if reason:
                 excluded[reason] += 1
+                if reason.startswith("scan_rights_"):
+                    rights_excluded_pages[file["scan_filename"].replace("_", " ")] += 1
                 continue
             batch.append(row); counts["published_text_records"] += 1
             quality_counts[str(row["source_quality_level"])] += 1
@@ -224,12 +253,17 @@ def package(source, output, rows_per_shard=2000):
     public_files = []
     for filename in sorted(used_files):
         file = files[filename]
-        public_files.append({k: v for k, v in file.items() if k != "raw_response_path"})
+        clean = {k: v for k, v in file.items() if k != "raw_response_path"}
+        clean['image_redistribution_held'] = image_rights_hold(file) is not None
+        clean['image_redistribution_hold_evidence'] = ('reports/wikisource-image-rights-holds.json#sha1=' + file['source_file_info']['sha1']) if image_rights_hold(file) else None
+        public_files.append(clean)
     (metadata / "scan_files.jsonl.gz").write_bytes(gzip.compress(b"".join((dumps(r) + "\n").encode() for r in public_files), mtime=0))
-    descriptions = []
+    descriptions, all_descriptions = [], {}
     for path in sorted(source.glob("raw/file-descriptions-v2/*/*.json.gz")):
         envelope = json.loads(gzip.decompress(path.read_bytes()))
         for page in envelope["response"].get("query", {}).get("pages", []):
+            filename = page["title"].split(":", 1)[-1].replace("_", " ")
+            all_descriptions[filename] = {"api_url": envelope["api_url"], "fetched_at": envelope["fetched_at"], "page": page}
             if page["title"].split(":", 1)[-1].replace("_", " ") in used_files:
                 descriptions.append({"api_url": envelope["api_url"], "fetched_at": envelope["fetched_at"], "page": page})
     (metadata / "scan_file_descriptions.jsonl.gz").write_bytes(gzip.compress(b"".join((dumps(r) + "\n").encode() for r in descriptions), mtime=0))
@@ -239,6 +273,52 @@ def package(source, output, rows_per_shard=2000):
               "rightsinfo": q["rightsinfo"], "proofreadqualitylevels": q["proofreadqualitylevels"],
               "proofreadnamespaces": q["proofreadnamespaces"]}
     (metadata / "source_rights_and_quality.json").write_text(dumps(rights) + "\n")
+    rights_holds = []
+    for filename in sorted(files):
+        file = files[filename]
+        if file["rights_review_status"] in ("source_asserted_public_domain", "source_asserted_open_license"):
+            continue
+        info = file["source_file_info"]
+        description = all_descriptions.get(filename, {})
+        revision = ((description.get("page", {}).get("revisions") or [{}])[0])
+        rights_holds.append({
+            "file_group_id": "arws-file-" + hashlib.sha256(filename.encode()).hexdigest(),
+            "scan_filename": filename, "scan_file_sha1": info.get("sha1"),
+            "scan_file_url": info.get("url"), "scan_description_url": info.get("descriptionurl"),
+            "source_description_api_url": description.get("api_url"),
+            "source_description_revision_id": revision.get("revid"),
+            "source_description_revision_url": (description.get("api_url", "").replace("/w/api.php", "/w/index.php")
+                + "?oldid=" + str(revision["revid"])) if revision.get("revid") else None,
+            "source_rights_assertions": info.get("extmetadata", {}),
+            "rights_review_status": file["rights_review_status"],
+            "rights_evidence_flags": file.get("rights_evidence_flags", []),
+            "rights_review_year": file.get("rights_review_year"),
+            "source_page_revision_records": source_file_pages[filename],
+            "records_excluded_at_rights_gate": rights_excluded_pages[filename],
+            "published_records": 0})
+    rights_report = {
+        "scope": "Source-file rights screening for community_text; source assertions are not worldwide clearance. Review holds are precautionary, not a legal finding about every work by an author.",
+        "policy": "Hold restrictive/unrecognized assertions, affirmative PD-old-N/source creator-death contradictions, and PD-asserted works attributed in the source Artist field to the two specifically reviewed authors. Match author identity/explicit alias, never filename or subject mentions. Explicit open-license assertions are considered separately.",
+        "review_year": 2026, "source_files_reviewed": len(files),
+        "excluded_source_files": len(rights_holds),
+        "source_page_revision_records_affected": sum(x["source_page_revision_records"] for x in rights_holds),
+        "records_excluded_at_rights_gate": sum(rights_excluded_pages.values()),
+        "files_by_status": dict(Counter(x["rights_review_status"] for x in rights_holds)),
+        "primary_policy_urls": ["https://commons.wikimedia.org/wiki/Template:PD-old-70", "https://commons.wikimedia.org/wiki/Commons:Licensing#Material_in_the_public_domain"],
+        "files": rights_holds}
+    (reports / "wikisource-rights-exclusions.json").write_text(json.dumps(rights_report, ensure_ascii=False, indent=2) + "\n")
+    image_holds = []
+    for filename, file in sorted(files.items()):
+        hold = image_rights_hold(file)
+        if hold:
+            info = file['source_file_info']
+            image_holds.append({**hold, 'scan_filename': filename, 'source_pdf_sha1': info['sha1'],
+                'source_pdf_url': info['url'], 'source_description_url': info.get('descriptionurl'),
+                'source_rights_assertions': info.get('extmetadata', {})})
+    (reports / 'wikisource-image-rights-holds.json').write_text(json.dumps({
+        'scope': 'Image redistribution holds based on exact-version PDF evidence; source text and edition-design rights are distinct.',
+        'source_files_held': len(image_holds), 'files': image_holds,
+        'non_work_records_excluded': excluded['non_work_modern_publisher_colophon']}, ensure_ascii=False, indent=2) + '\n')
     report = {"status": "passed", "config": "community_text", "split": "train", "contains_image_bytes": False,
               "is_heldout_benchmark": False, "counts": dict(counts), "excluded_records_by_reason": dict(excluded),
               "source_quality_counts": dict(quality_counts), "quality_flag_counts": dict(flags),
@@ -248,7 +328,7 @@ def package(source, output, rows_per_shard=2000):
               "packager_sha256": digest(Path(__file__)),
               "source_inventory_qc_sha256": digest(source / "independent-inventory-qc.json"),
               "source_render_summary_sha256": digest(source / "render-summary.json"),
-              "selection_policy": "Source quality3/4 agrees; scan association, recognized source-rights evidence, valid page range; nonempty rendered Arabic text; no parser error/missing-template elements. Short or low-Arabic-fraction text remains flagged.",
+              "selection_policy": "Source quality3/4 agrees; scan association, recognized source-rights evidence without an unresolved review hold, valid page range; nonempty rendered Arabic text; no parser error/missing-template elements. See the per-file rights-exclusions report. Short or low-Arabic-fraction text remains flagged.",
               "no_gold_claim": "Source-community proofreading status only; body text excludes noinclude header/footer; no independently verified image correspondence or line/region geometry."}
     (reports / "wikisource-inventory-qc.json").write_text(json.dumps(inventory_qc, ensure_ascii=False, indent=2) + "\n")
     if (source / "file-description-template-audit.json").exists():
@@ -280,6 +360,14 @@ Public-domain and open-license classifications record
 source assertions, not Bayanat worldwide legal clearance. No new CC0 dedication
 is made for the collection. Source/API rights evidence is retained without HTTP
 headers, credentials, or local private paths.
+
+The published rights-exclusions report identifies files withheld because of
+contradictory or unresolved rights evidence, including a narrow review of other
+PD-asserted works by authors implicated in an affirmative source contradiction.
+It preserves the exact assertions, file/revision IDs, and excluded-record counts.
+The separate image-rights-holds report records any contradiction found inside an
+actual frozen PDF. Such body-text rows carry an image-redistribution hold flag;
+their recorded Commons license assertion does not authorize redistributing images.
 
 ACO IDs found in source credits support grouping mirrored editions before any
 downstream evaluation split; those links do not independently prove that files

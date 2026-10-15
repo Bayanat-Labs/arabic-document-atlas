@@ -102,13 +102,15 @@ def throughput(log_path,expected):
             if not math.isfinite(elapsed) or elapsed<0 or stamp.tzinfo is None:continue
             if any(not isinstance(item[k],int) or item[k]<0 for k in ('pages','processed_source_occurrences','words','shards')):continue
         except (ValueError,TypeError):continue
-        item={**item,'elapsed_seconds':elapsed,'_timestamp':stamp}
-        if current and (elapsed<current[-1]['elapsed_seconds'] or stamp<current[-1]['_timestamp'] or any(item[k]<current[-1][k] for k in ('pages','processed_source_occurrences','words','shards'))):
+        item={**item,'elapsed_seconds':elapsed,'_timestamp':stamp,'_run_origin':stamp.timestamp()-elapsed}
+        # A restart can have a LARGER first elapsed value than the old run's last
+        # value. Inferred UTC origin catches it;2s allows whole-second log stamps.
+        if current and (abs(item['_run_origin']-current[0]['_run_origin'])>2 or elapsed<current[-1]['elapsed_seconds'] or stamp<current[-1]['_timestamp'] or any(item[k]<current[-1][k] for k in ('pages','processed_source_occurrences','words','shards'))):
             segments.append(current);current=[]
         current.append(item)
     if current:segments.append(current)
-    base={'log_sha256':sha_file(log_path),'progress_records':len(records),'detected_run_segments':len(segments),'ignored_non_json_lines':ignored,
-          'scope':'Observed interval within the final monotonic run segment, including download/render/OCR/validation/upload/wait time; not isolated OCR speed. Restarts are never pooled.'}
+    base={'log_sha256':sha_file(log_path),'progress_records':len(records),'detected_run_segments':len(segments),'run_origin_tolerance_seconds':2,'ignored_non_json_lines':ignored,
+          'scope':'Observed interval within the final monotonic/inferred-run-origin segment, including download/render/OCR/validation/upload/wait time; not isolated OCR speed. Elapsed/counter resets or UTC-origin changes split runs; clock jumps also conservatively split them. No explicit run ID exists, and restarts are not pooled.'}
     if not segments or len(segments[-1])<2:return {**base,'available':False,'reason':'Fewer than two valid progress observations in final run segment.'}
     segment=segments[-1];first,last=segment[0],segment[-1]
     if any(last[k]!=expected[k] for k in ('pages','processed_source_occurrences','words','shards')):

@@ -4,8 +4,12 @@ import argparse
 from collections import Counter
 import gzip
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
+
+spec = importlib.util.spec_from_file_location("wikisource_rights_qc", Path(__file__).resolve().parents[1] / "acquisition/wikisource.py")
+source_policy = importlib.util.module_from_spec(spec); spec.loader.exec_module(source_policy)
 
 
 def rows(paths):
@@ -39,6 +43,11 @@ def main():
             checked_file_responses.add(relative)
         if raw_file_metadata.get(file["scan_filename"].replace("_", " ")) != file["source_file_info"]:
             failures.append({"filename": file["scan_filename"], "error": "normalized_file_metadata_differs_from_raw_response"})
+        ext = file["source_file_info"].get("extmetadata", {})
+        if (file['rights_review_status'] != source_policy.rights_classification(ext)
+                or file.get('rights_evidence_flags') != source_policy.rights_evidence_flags(ext)
+                or file.get('rights_review_year') != source_policy.RIGHTS_REVIEW_YEAR):
+            failures.append({"filename": file["scan_filename"], "error": "rights_triage_differs_from_current_evidence_policy"})
     checked_descriptions = 0
     for path in sorted(root.glob("raw/file-descriptions-v2/*/*.json.gz")):
         envelope = json.loads(gzip.decompress(path.read_bytes()))

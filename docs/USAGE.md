@@ -14,7 +14,7 @@ pages = load_dataset(
 page = next(iter(pages))
 display(page["image"])
 print(page["page_text"])
-print(page["words"][0])
+print(page["words"][:1])  # Sparse/blank pages can have no recognized words.
 ```
 
 Install the versioned Python dependencies from the source repository. For Arrow
@@ -40,7 +40,7 @@ footnotes, poetry and tables.
 - Build citation-preserving visual document retrieval and region-highlighting tools.
 - Analyze quality-screen yield, duplicate occurrences and extraction failures.
 
-The images are historical printed pages. They do not establish coverage of
+The main image tier contains historical printed pages. It does not establish coverage of
 modern invoices, handwriting, receipts, identity documents or contemporary
 dialects. They have no manually verified table cells, semantic regions or
 reading-order annotations.
@@ -59,6 +59,33 @@ verified word boxes. Rendered text normally covers the transcluded page body,
 excluding `noinclude` headers and footers; see row-level extraction warnings.
 Some current scan versions postdate the text revision. This is community source
 evidence, not Bayanat-verified error-free evaluation gold.
+
+## Image/reference pairs
+
+```python
+pairs = load_dataset(
+    "Bayanat-Labs/arabic-document-atlas", "reference_pairs",
+    split="train", streaming=True, revision="v0.1.0",
+)
+pair = next(iter(pairs))
+display(pair["image"])
+print(pair["reference_text"])
+print(pair["source_quality_level"], pair["source_revision_id"])
+```
+
+These rows add PDF page renders to a narrower subset of `community_text`.
+They retain source proofreading status, file-specific rights, exact source
+binary hashes, PDF position and text revision. They do not have machine OCR or
+word boxes. Some source PDFs are born digital. The text covers the transcluded
+body; omitted headers/footers and source formatting can prevent direct
+whole-image CER comparison. Page numbering supplies the source association;
+Bayanat has not independently visually certified alignment or proofreading.
+The paired text is already present in `community_text`.
+
+The original PDFs are included under `source/reference_pdfs/`; obtain each path
+and SHA256 from the reference metadata. Preserve the original per-file credits
+and CC BY-SA 4.0 notices when reusing images or adapting them. The source
+repository's `pipeline/REFERENCE_PAIRS.md` describes reproduction and screening.
 
 ## Splits and leakage
 

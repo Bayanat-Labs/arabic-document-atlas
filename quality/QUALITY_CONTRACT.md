@@ -15,7 +15,13 @@ logical_page_id = SHA256(JSON([source_collection, source_document_id, source_can
 page_id = SHA256(JSON([logical_page_id, image_request_profile]))
 ```
 
-A logical page remains the same page when its resolution, format or OCR engine changes. Count distinct logical IDs for the physical-page count, not profile variants, words, regions, OCR engines, augmentations or discovered manifests. A new edition/scan requires its actual distinct source document identity. Canonical JSON prevents delimiter collisions.
+A logical ID identifies a source canvas occurrence across changes of resolution,
+format or OCR engine. It does not independently establish a unique physical
+page: mirrored sources can expose the same raster under distinct canvas IDs.
+The released unique-image headline uses the union of canonical decoded-pixel
+hashes across image components; source occurrences and profile variants remain
+separate counts. A new edition/scan requires its actual distinct source document
+identity. Canonical JSON prevents delimiter collisions.
 
 Published `words` contain unique page-local `id`, source `text`, `bbox`, `confidence`, and `line_id`. `lines` contain unique `id`, `text`, `bbox`, `word_ids`, `order_index`, and `order_method`. A box is integer `[x0,y0,x1,y1]` in a **top-left-origin, half-open pixel coordinate space of the published raster**, satisfying `0 <= x0 < x1 <= width` and likewise for y. Native-PDF points, original scan pixels, resized raster pixels and crops are different coordinate spaces. Transforms must be explicit before a record is normalized; native points are not relabeled as pixels.
 
@@ -65,4 +71,15 @@ Current [Surya2 documentation](https://github.com/datalab-to/surya) describes a6
 
 Run `python3 -m unittest discover -s research/arabic-document-atlas/quality -p 'test_*.py' -v`. The tests include adversarial RTL/mixed-script records, controls and credentials, confidence sentinels/NaN, out-of-bounds geometry, line membership/order corruption, lost original-engine words during reconstruction, image re-encoding and alpha, cross-book duplicate text, profile/physical identity, and cross-split document leakage. A tiny original native PDF is actually extracted with Poppler, rendered at144DPI, and OCRed by installed Tesseract English to check coordinate units and real TSV semantics. Independent Arabic raster fixtures are actually processed by pinned Arabic Tesseract and the local Apple Vision binary when available. These tests check structural integration, not measured CER/WER. The22 validator tests passed in the local system Python with RAQM on2026-10-15. The shared build environment lacks RAQM, so the two generated-Arabic-fixture integrations explicitly skip there; actual corpus pages do not require RAQM for OCR. Nine additional durable-builder tests check immutable resume bindings, fixed blank/text schemas, actual Hugging Face streaming/PIL decoding, native partial-response timeout/restart, source inventory revisions, exact-pixel duplicate lineage, corrupted/uncommitted shard detection, multiline source metadata, and hash-bound verified-input eviction. The shared build suite has31 tests, with the two RAQM-dependent fixture integrations explicitly skipped there. No fixture success is counted as a real corpus page or an Arabic OCR accuracy result.
 
-The separate six release-report tests use a hand-calculated source-independent ledger to verify fractional provider/year coverage, quantiles and screening denominators, duplicate-only source origins, resolved/unresolved failure attempts, source/config binding, quiet-state/concurrent-write rejection, and restart-safe observed-interval throughput. No report fixture contributes to release counts.
+The separate seven release-report tests use a hand-calculated source-independent ledger to verify fractional provider/year coverage, quantiles and screening denominators, duplicate-only source origins, resolved/unresolved failure attempts, source/config binding, quiet-state/concurrent-write rejection, and restart-safe observed-interval throughput. No report fixture contributes to release counts.
+
+Publication, reference integration and explorer regression suites use only local
+original engineering fixtures and mocked Hub APIs. They cover quiet snapshot
+refusal (including pending documents and concurrent WAL commits), immutable
+source metadata/raw manifest proofs, remote hashes/sizes/paths, duplicate-only
+source origins, cross-component pixel unions, source PDF/permission retention,
+explicit component file allowlists, version/package guards, interrupted-upload
+recovery, parent-commit protection, source-package secret/artifact/symlink
+exclusions, actual explorer image bytes and resource cleanup on failure. These
+tests make no network calls and never alter the production dataset. The frozen
+CI run records the final test count for each release.

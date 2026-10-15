@@ -40,6 +40,13 @@ def validate(output):
             row = json.loads(line)
             check("raw_response_path" not in row, "Private evidence path in public metadata")
             files[row["scan_filename"].replace("_", " ")] = row
+    rights = json.loads((output / "reports/wikisource-rights-exclusions.json").read_text())
+    held = {r['scan_filename'] for r in rights['files']}
+    check(len(held) == len(rights['files']) == rights['excluded_source_files'], "Duplicate/incorrect held-file count")
+    check(not held.intersection(files), "A rights-held file entered public rows")
+    check(rights['records_excluded_at_rights_gate'] == sum(r['records_excluded_at_rights_gate'] for r in rights['files']), "Rights exclusion record counts differ")
+    check(rights['source_page_revision_records_affected'] == sum(r['source_page_revision_records'] for r in rights['files']), "Rights affected counts differ")
+    check(rights['records_excluded_at_rights_gate'] == sum(v for k, v in report['excluded_records_by_reason'].items() if k.startswith('scan_rights_')), "Rights exclusion report/build counts differ")
     seen, source_pages, scan_files = set(), set(), set()
     quality, flags = Counter(), Counter()
     n = 0
@@ -75,6 +82,12 @@ def validate(output):
                 check(0 <= row["text_arabic_letter_fraction"] <= 1, "Invalid fraction")
                 filename = row["scan_filename"].replace("_", " ")
                 file = files[filename]; info = file["source_file_info"]
+                image_hold = package.image_rights_hold(file)
+                check(file.get('image_redistribution_held') is (image_hold is not None), 'Missing/incorrect image redistribution hold')
+                check(('scan_image_redistribution_held_pdf_license_conflict' in row['quality_flags']) == (image_hold is not None), 'Missing/incorrect PDF license conflict flag')
+                if image_hold:
+                    check(row['scan_page_number'] not in image_hold['non_work_page_numbers'], 'Non-work publisher colophon retained')
+                    check(file.get('image_redistribution_hold_evidence') == 'reports/wikisource-image-rights-holds.json#sha1=' + info['sha1'], 'Missing image rights evidence pointer')
                 check(row["scan_file_sha1"] == info["sha1"] and row["scan_file_timestamp"] == info["timestamp"], "Source scan version mismatch")
                 check(row["scan_file_url"] == info["url"] and row["scan_description_url"] == info["descriptionurl"], "Source scan provenance mismatch")
                 check(row["scan_rights_review_status"] == file["rights_review_status"] and file["rights_review_status"] in ("source_asserted_public_domain", "source_asserted_open_license"), "Unsupported scan rights")
