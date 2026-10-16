@@ -35,7 +35,7 @@ from datasets import load_dataset
 
 pages = load_dataset(
     "Bayanat-Labs/arabic-document-atlas", "pages",
-    split="train", streaming=True, revision="v0.1.0",
+    split="train", streaming=True, revision="v0.2.0",
 )
 page = next(iter(pages))
 print(page["page_text"])

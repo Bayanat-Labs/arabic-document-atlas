@@ -9,7 +9,7 @@ from datasets import load_dataset
 
 pages = load_dataset(
     "Bayanat-Labs/arabic-document-atlas", "pages",
-    split="train", streaming=True, revision="v0.1.0",
+    split="train", streaming=True, revision="v0.2.0",
 )
 page = next(iter(pages))
 display(page["image"])
@@ -65,7 +65,7 @@ evidence, not Bayanat-verified error-free evaluation gold.
 ```python
 pairs = load_dataset(
     "Bayanat-Labs/arabic-document-atlas", "reference_pairs",
-    split="train", streaming=True, revision="v0.1.0",
+    split="train", streaming=True, revision="v0.2.0",
 )
 pair = next(iter(pairs))
 display(pair["image"])
