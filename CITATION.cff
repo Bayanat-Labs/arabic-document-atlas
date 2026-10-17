@@ -4,8 +4,8 @@ type: dataset
 title: "Bayanat Arabic Document Atlas"
 authors:
   - name: "Bayanat Labs"
-version: 0.2.0
+version: 0.3.0
 url: "https://www.bayanatlabs.com/open/arabic-document-atlas"
 repository-code: "https://github.com/Bayanat-Labs/arabic-document-atlas"
-repository-artifact: "https://huggingface.co/datasets/Bayanat-Labs/arabic-document-atlas"
-date-released: 2026-10-16
+repository-artifact: "https://huggingface.co/datasets/Bayanat-Labs/arabic-document-atlas/tree/v0.3.0"
+date-released: 2026-10-17

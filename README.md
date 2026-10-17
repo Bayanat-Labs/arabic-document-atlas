@@ -4,11 +4,11 @@ Authentic Arabic document images with embedded JPEG bytes, machine OCR,
 approximate word guides, source-version hashes, community reference text and
 quality reports.
 
-[Dataset](https://huggingface.co/datasets/Bayanat-Labs/arabic-document-atlas) ·
+[Dataset](https://huggingface.co/datasets/Bayanat-Labs/arabic-document-atlas/tree/v0.3.0) ·
 [Visual explorer](https://huggingface.co/spaces/Bayanat-Labs/arabic-document-atlas) ·
 [Research and release record](https://www.bayanatlabs.com/open/arabic-document-atlas)
 
-The published dataset card and pinned `metadata/release-summary.json` are the
+The published dataset card and pinned [release summary](https://huggingface.co/datasets/Bayanat-Labs/arabic-document-atlas/resolve/v0.3.0/metadata/release-summary.json) are the
 authority for completed counts. A discovered catalog record or source canvas
 is not a downloaded unique image. Word records, image variants and the separate
 community-text tier are not added to the image-page count.
@@ -35,7 +35,7 @@ from datasets import load_dataset
 
 pages = load_dataset(
     "Bayanat-Labs/arabic-document-atlas", "pages",
-    split="train", streaming=True, revision="v0.2.0",
+    split="train", streaming=True, revision="v0.3.0",
 )
 page = next(iter(pages))
 print(page["page_text"])
